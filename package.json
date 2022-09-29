@@ -1,6 +1,6 @@
 {
-	"name": "typescript-template",
-	"description": "typescript, eslint, mocha test template",
+	"name": "lostark",
+	"description": "nodejs lostark api utils",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
 	"version": "1.0.0",

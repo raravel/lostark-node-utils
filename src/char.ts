@@ -1,6 +1,6 @@
 import axios from 'axios';
 import qs from 'querystring';
-import cheerio, { CheerioAPI } from 'cheerio';
+import cheerio, { Cheerio, CheerioAPI } from 'cheerio';
 import { pipe } from './utils';
 
 const ENGRAVE_QUERY = '.profile-ability-engrave .swiper-container .swiper-wrapper ul li span';
@@ -13,6 +13,21 @@ const SPLIT_BREAKLINE_REGEX = /<BR>/i;
 const ACCESSORY_ENGRAVE_REGEX = /\[(.*?)\] 활성도 \+(\d+)/;
 const AVAILITY_STONE_QUERY = '#profile-equipment .profile-equipment__slot div.slot13:has(img)';
 const SKILL_RUNE_REGEX = /(\W+) 스킬 룬/;
+const BRACELET_QUERY = '#profile-equipment .profile-equipment__slot div.slot12:has(img)';
+const BRACELET_REGEX = /(\W+) 팔찌/;
+const AVAILITY_QUERY = '.profile-ability-basic ul li span';
+const BATTLE_STATUS_QUERY = '.profile-ability-battle ul > li';
+const JEWEL_QUERY = '#profile-jewel [id*=gem]';
+const JEWEL_LEVEL_REGEX = /^(\d+)레벨/;
+const CARD_LIST_QUERY = '#cardList li > div.card-slot';
+const CARD_EFFECT_QUERY = '#cardSetList > li';
+const MEMBER_NO_REGEX = /var _memberNo = '(.*)?';/;
+const PC_ID_REGEX = /var _pcId = '(.*)?';/;
+const WORLD_NO_REGEX = /var _worldNo = '(.*)?';/;
+const TITLE_QUERY = '.game-info > .game-info__title span:last-child';
+const GUILD_QUERY = '.game-info > .game-info__guild span:last-child';
+const PVP_LEVEL_QUERY = '.game-info > .level-info__pvp span:last-child';
+
 
 interface CharacterProfileEngrave {
 	name: string;
@@ -22,6 +37,11 @@ interface CharacterProfileEngrave {
 interface CharacterProfileStatus {
 	name: string;
 	amount: number;
+}
+
+interface CharacterProfileBasicAvaility {
+	offense: number;
+	life: number;
 }
 
 interface CharacterProfileBattleStatus {
@@ -81,6 +101,64 @@ interface CharacterProfileSkill {
 	type: string;
 }
 
+interface CharacterProfileBracelet {
+	name: string;
+	title: string;
+	iconPath: string;
+	effects: string[];
+}
+
+interface CharacterProfileJewel {
+	name: string;
+	title: string;
+	iconPath: string;
+	level: number;
+	effect: string;
+}
+
+interface CharacterProfileCardEffect {
+	title: string;
+	description: string;
+}
+
+interface CharacterProfileCard {
+	name: string;
+	awakeCount: number;
+	awakeTotal: number;
+	iconPath: string;
+	description: string;
+}
+
+interface CharacterProfileCardSet {
+	effects: CharacterProfileCardEffect[];
+	cardList: CharacterProfileCard[];
+}
+
+interface CharacterProfileCollection {
+	heart: CharacterProfileCollectionItem;
+	island: CharacterProfileCollectionItem;
+	seed: CharacterProfileCollectionItem;
+	art: CharacterProfileCollectionItem;
+	voyage: CharacterProfileCollectionItem;
+	tree: CharacterProfileCollectionItem;
+	medal: CharacterProfileCollectionItem;
+	star: CharacterProfileCollectionItem;
+	memory: CharacterProfileCollectionItem;
+}
+type CollectionKey = keyof CharacterProfileCollection;
+
+interface CharacterProfileCollectionListItem {
+	title: string;
+	isComplete: boolean;
+}
+
+interface CharacterProfileCollectionItem {
+	title: string;
+	max: number;
+	now: number;
+	list: CharacterProfileCollectionListItem[];
+}
+
 const searchEquipElementByType = (equip: any = {}, type: string) =>
 	Object.entries(equip)
 		.filter(([key, element]) => (element as any)?.type === type)
@@ -88,13 +166,42 @@ const searchEquipElementByType = (equip: any = {}, type: string) =>
 
 const getFirstItemFromArray = ([firstItem]) => firstItem;
 const removeHtmlTag = (html: string) => cheerio.load(html).text().trim();
+const removeChildren = ($: Cheerio<any>, selector) => $.clone().children(selector).remove().end();
 
-class CharacterProfile {
+export class CharacterProfile {
 	private profile: any = {};
+	private memberNo: string = '';
+	private pcId: string = '';
+	private worldNo: string = '';
+
 	constructor(private $: CheerioAPI, body: string) {
-		const t: any = body.match(/<script type="text\/javascript">[\s\S]*?= ([\s\S]*})?;/);
+		let t: any = body.match(/<script type="text\/javascript">[\s\S]*?= ([\s\S]*})?;/);
 		if ( t === null ) throw Error('Cannot parsing profile information');
 		this.profile = JSON.parse(t[1]);
+
+		t = body.match(MEMBER_NO_REGEX);
+		if ( t === null ) throw Error('Cannot parsing _memberNo variable');
+		this.memberNo = t[1];
+
+		t = body.match(PC_ID_REGEX);
+		if ( t === null ) throw Error('Cannot parsing _pcId variable');
+		this.pcId = t[1];
+
+		t = body.match(WORLD_NO_REGEX);
+		if ( t === null ) throw Error('Cannot parsing _worldNo variable');
+		this.worldNo = t[1];
+	}
+
+	get title(): string {
+		return this.$(TITLE_QUERY).text().trim();
+	}
+
+	get pvpLevel(): string {
+		return this.$(PVP_LEVEL_QUERY).text().trim();
+	}
+
+	get guild(): string {
+		return this.$(GUILD_QUERY).text().trim();
 	}
 
 	get engrave(): CharacterProfileEngrave[] {
@@ -237,7 +344,8 @@ class CharacterProfile {
 					pipe(
 						getFirstItemFromArray,
 						({ value }) => {
-							newObj.title = removeHtmlTag(value.leftStr0);
+							newObj.title = (removeHtmlTag(value.leftStr0)
+								.match(SKILL_RUNE_REGEX) as RegExpMatchArray)[1];
 							newObj.iconPath = value.slotData.iconPath;
 						},
 					)(searchEquipElementByType(rune.tooltip, 'ItemTitle'));
@@ -258,6 +366,188 @@ class CharacterProfile {
 			results.push(skill as CharacterProfileSkill);
 		});
 		return results;
+	}
+
+	get bracelet(): CharacterProfileBracelet|undefined {
+		const slot = this.$(BRACELET_QUERY);
+		if ( !slot.length ) return;
+
+		const itemKey = this.$(slot).data('item') as string;
+		const equip = this.profile.Equip[itemKey];
+
+		const obj: any = {};
+		obj.name = pipe(
+			getFirstItemFromArray,
+			({ value }) => removeHtmlTag(value),
+		)(searchEquipElementByType(equip, 'NameTagBox'));
+
+		pipe(
+			getFirstItemFromArray,
+			({ value }) => {
+				obj.title = (removeHtmlTag(value.leftStr0)
+					.match(BRACELET_REGEX) as RegExpMatchArray)[1];
+				obj.iconPath = value.slotData.iconPath;
+			},
+		)(searchEquipElementByType(equip, 'ItemTitle'));
+
+		obj.effects = pipe(
+			getFirstItemFromArray,
+			({ value }) => value.Element_001.split(SPLIT_BREAKLINE_REGEX)
+				.map(removeHtmlTag),
+		)(searchEquipElementByType(equip, 'ItemPartBox'));
+
+		return obj;
+	}
+
+	get basic(): CharacterProfileBasicAvaility {
+		const basicTmp = this.$(AVAILITY_QUERY);
+		const offense = parseInt(this.$(basicTmp[1]).text());
+		const life = parseInt(this.$(basicTmp[3]).text());
+
+		return {
+			offense,
+			life,
+		};
+	}
+
+	get battle(): CharacterProfileBattleStatus[] {
+		const battle: CharacterProfileBattleStatus[] = [];
+		this.$(BATTLE_STATUS_QUERY).each((idx, elem) => {
+			const child = this.$(elem).children('span');
+			const name = this.$(child[0]).text();
+			const amount = parseInt(this.$(child[1]).text());
+
+			if ( name ) {
+				battle.push({ name, amount });
+			}
+		});
+
+		return battle;
+	}
+
+	get jewels(): CharacterProfileJewel[] {
+		const jewels: CharacterProfileJewel[] = [];
+		this.$(JEWEL_QUERY).each((idx, elem) => {
+			const itemKey = this.$(elem).data('item') as string;
+			const equip = this.profile.Equip[itemKey];
+
+			const obj: any = {};
+
+			obj.name = pipe(
+				getFirstItemFromArray,
+				({ value }) => removeHtmlTag(value),
+			)(searchEquipElementByType(equip, 'NameTagBox'));
+
+			obj.level = pipe(
+				([m, level]: RegExpMatchArray) => +level,
+			)(obj.name.match(JEWEL_LEVEL_REGEX));
+
+			pipe(
+				getFirstItemFromArray,
+				({ value }) => {
+					obj.title = removeHtmlTag(value.leftStr0);
+					obj.iconPath = value.slotData.iconPath;
+				},
+			)(searchEquipElementByType(equip, 'ItemTitle'));
+
+			obj.effect = pipe(
+				getFirstItemFromArray,
+				({ value }) => removeHtmlTag(value.Element_001),
+			)(searchEquipElementByType(equip, 'ItemPartBox'));
+			jewels.push(obj as CharacterProfileJewel);
+		});
+		return jewels;
+	}
+
+	get card(): CharacterProfileCardSet {
+		const effects: CharacterProfileCardEffect[] = [];
+		const cardList: CharacterProfileCard[] = [];
+
+		this.$(CARD_EFFECT_QUERY).each((idx, elem) => {
+			effects.push({
+				title: this.$(elem).children('.card-effect__title').text().trim(),
+				description: this.$(elem).children('.card-effect__dsc').text().trim(),
+			});
+		});
+		this.$(CARD_LIST_QUERY).each((idx, elem) => {
+			const itemKey = this.$(elem).data('item') as string;
+			const card = this.profile.Card[itemKey];
+			const obj: any = {};
+
+			obj.name = pipe(
+				getFirstItemFromArray,
+				({ value }) => removeHtmlTag(value),
+			)(searchEquipElementByType(card, 'NameTagBox'));
+
+			pipe(
+				getFirstItemFromArray,
+				({ value }) => {
+					obj.awakeCount = value.awakeCount;
+					obj.awakeTotal = value.awakeTotal;
+					obj.iconPath = value.iconData.iconPath;
+				},
+			)(searchEquipElementByType(card, 'Card'));
+
+			obj.description = pipe(
+				getFirstItemFromArray,
+				({ value }) => removeHtmlTag(value),
+			)(searchEquipElementByType(card, 'SingleTextBox'));
+			cardList.push(obj as CharacterProfileCard);
+		});
+
+		return {
+			effects,
+			cardList,
+		};
+	}
+
+	get collection(): Promise<CharacterProfileCollection> {
+		return (async () => {
+			const res = await axios({
+				url: `https://lostark.game.onstove.com/Profile/GetCollection`,
+				method: 'post',
+				data: {
+					memberNo: this.memberNo,
+					worldNo: this.worldNo,
+					pcId: this.pcId,
+				},
+			});
+			const $ = cheerio.load(res.data);
+			
+			function getCollection(name: CollectionKey): CharacterProfileCollectionItem {
+				const title = $(`.lui-tab__content.${name} span.collection-image > img`).attr('alt') as string;
+				const collection = $(`.lui-tab__content.${name} .collection-list`);
+				const nowCount = +$(collection).find('.now-count').text();
+				const maxCount = +$(collection).find('.max-count').text();
+				const list: CharacterProfileCollectionListItem[] = [];
+
+				$(collection).find('.collection-list ul.list > li').each((idx, elem) => {
+					const isComplete = !!$(elem).hasClass('complete');
+					const title = removeChildren($(elem), ':not(em:has(span))')
+						.text()
+						.replace(/\//g, ' /') // for seed world status
+						.replace(/\s+/g, ' ')
+						.trim();
+					list.push({
+						isComplete,
+						title,
+					});
+				});
+				return {
+					title,
+					now: nowCount,
+					max: maxCount,
+					list,
+				};
+			}
+
+			const collectionKey: CollectionKey[] = ['heart', 'island', 'seed', 'art', 'voyage', 'tree', 'medal', 'star', 'memory'];
+			
+			return Object.fromEntries(collectionKey.map((key: CollectionKey) => [
+				key,
+				getCollection(key),
+			])) as any;
+		})();
 	}
 }
 
