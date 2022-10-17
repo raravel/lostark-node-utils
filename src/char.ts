@@ -6,7 +6,7 @@ import { pipe } from './utils';
 const ENGRAVE_QUERY = '.profile-ability-engrave .swiper-container .swiper-wrapper ul li span';
 const ENGRAVE_REGEX = /(.*) Lv\. (\d*)/;
 const ACCESSORY_QUERY = '#profile-equipment .profile-equipment__slot div:has(img[src*=Acc])';
-const EQUIPMENT_QUERY = '#profile-equipment .profile-equipment__slot div:has(img[src*=BL_Item])';
+const EQUIPMENT_QUERY = '#profile-equipment .profile-equipment__slot div:has(img[src*=_Item])';
 const EQUIPMENT_REGEX = /\+(\d+) (.*)/;
 const STATUS_REGEX = /(\W+) (\W\d+)/;
 const SPLIT_BREAKLINE_REGEX = /<BR>/i;
@@ -339,10 +339,15 @@ export class CharacterProfile {
 			pipe(
 				getFirstItemFromArray,
 				({ value }: any) => removeHtmlTag(value),
-				(str) => str.match(EQUIPMENT_REGEX),
-				(([, upgrade, name]: RegExpMatchArray) => {
-					obj.name = name;
-					obj.upgrade = +upgrade;
+				(str) => str.match(EQUIPMENT_REGEX) || str,
+				((val: string|RegExpMatchArray) => {
+					if ( typeof val === 'string' ) {
+						obj.name = val;
+						obj.upgrade = 0;
+					} else {
+						obj.name = val[2];
+						obj.upgrade = +val[1];
+					}
 				}),
 			)(searchEquipElementByType(equip, 'NameTagBox'));
 
@@ -356,7 +361,7 @@ export class CharacterProfile {
 
 			obj.setName = pipe(
 				(list: any[]) => list.find(item => removeHtmlTag(item.value.Element_000) === '세트 효과 레벨'),
-				({ value }) => removeHtmlTag(value.Element_001),
+				(element) => removeHtmlTag(element?.value?.Element_001 || ''),
 			)(searchEquipElementByType(equip, 'ItemPartBox'));
 			results.push(obj as CharacterProfileEquipment);
 		});
@@ -395,7 +400,7 @@ export class CharacterProfile {
 	}
 
 	get gems(): CharacterProfileGems[] {
-		const results: CharacterProfileGems[] = this.profile.GemSkillEffect.map((obj) => ({
+		const results: CharacterProfileGems[] = this.profile.GemSkillEffect?.map((obj) => ({
 			index: obj.EquipGemSlotIndex,
 			description: removeHtmlTag(obj.SkillDesc),
 			icon: obj.SkillIcon,

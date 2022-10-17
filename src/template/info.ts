@@ -1,7 +1,12 @@
 import { CharacterProfile } from "../char";
 import path from 'path';
+import fs from 'fs';
 
-const engraveImagePath = (name: string) => path.join(__dirname, `engrave-imgs/${name}.png`);
+const engraveImagePath = (name: string) => {
+	const img = path.join(__dirname, `engrave-imgs/${name}.png`);
+	const b64 = fs.readFileSync(img, 'base64');
+	return 'data:image/png;base64,' + b64;
+}
 
 export const infoToHTML = (info: CharacterProfile): string =>
 /* html */ `
@@ -224,7 +229,7 @@ export const infoToHTML = (info: CharacterProfile): string =>
 	</div>
 	<!-- E: 기본 정보 -->
 	<!-- S: 카드 -->
-	<div class="px-10" style="background-color: #15181D; min-height: 240px;">
+	<div class="px-10" style="background-color: #15181D; min-height: 240px; ${info.card.cardList.length === 0 ? 'display: none;' : ''}">
 		<div class="flex flex-row" style=" position: relative;  height: 220px;">
 			${
 				info.card.cardList.map((card, index) =>
@@ -329,9 +334,9 @@ export const infoToHTML = (info: CharacterProfile): string =>
 						</div>
 					</div>
 					<figcaption class="font-medium pl-5">
-						<div class="">+${equipment.upgrade} ${equipment.name}</div>
+						<div class="">${equipment.upgrade > 0 ? `+${equipment.upgrade}` : ''} ${equipment.name}</div>
 						<div class="font-base">
-							<span class="px-2 py-1 mt-1 rounded-full text-gray-500 bg-gray-200 font-medium text-xs flex align-center w-max">
+							<span class="px-2 py-1 mt-1 rounded-full text-gray-500 bg-gray-200 font-medium text-xs flex align-center w-max" style="${equipment.setName ? '' : 'display: none;'}">
 								${equipment.setName}
 							</span>
 						</div>
