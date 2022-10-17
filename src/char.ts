@@ -388,7 +388,8 @@ export class CharacterProfile {
 		)(searchEquipElementByType(equip, 'ItemTitle'));
 
 		pipe(
-			([ , , engraveBox ]) => {
+			(list) => list[list.length-1],
+			(engraveBox) => {
 				result.engraves = engraveBox.value.Element_001
 					.split(SPLIT_BREAKLINE_REGEX)
 					.map(removeHtmlTag)
