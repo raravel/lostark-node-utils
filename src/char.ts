@@ -27,6 +27,8 @@ const WORLD_NO_REGEX = /var _worldNo = '(.*)?';/;
 const TITLE_QUERY = '.game-info > .game-info__title span:last-child';
 const GUILD_QUERY = '.game-info > .game-info__guild span:last-child';
 const PVP_LEVEL_QUERY = '.game-info > .level-info__pvp span:last-child';
+const NICKNAME_QUERY = '.profile-character-info__name';
+const CHARACTER_IMG_QUERY = '#profile-equipment > .profile-equipment__character > img';
 
 
 interface CharacterProfileEngrave {
@@ -63,6 +65,7 @@ interface CharacterProfileEquipment {
 	quality: number;
 	iconPath: string;
 	upgrade: number;
+	setName: string;
 }
 
 interface CharacterProfileAvailityStone {
@@ -76,6 +79,7 @@ interface SkillRune {
 	title: string;
 	effect: string;
 	iconPath: string;
+	grade: number;
 }
 
 interface SkillTripod {
@@ -99,6 +103,15 @@ interface CharacterProfileSkill {
 	slotIcon: string;
 	tripodList: SkillTripod[];
 	type: string;
+	use: boolean;
+}
+
+interface CharacterProfileGems {
+	index: number;
+	description: string;
+	icon: string;
+	name: string;
+	slotIndex: number;
 }
 
 interface CharacterProfileBracelet {
@@ -114,6 +127,7 @@ interface CharacterProfileJewel {
 	iconPath: string;
 	level: number;
 	effect: string;
+	grade: number;
 }
 
 interface CharacterProfileCardEffect {
@@ -127,6 +141,7 @@ interface CharacterProfileCard {
 	awakeTotal: number;
 	iconPath: string;
 	description: string;
+	tierGrade: number;
 }
 
 interface CharacterProfileCardSet {
@@ -161,8 +176,8 @@ interface CharacterProfileCollectionItem {
 
 const searchEquipElementByType = (equip: any = {}, type: string) =>
 	Object.entries(equip)
-		.filter(([key, element]) => (element as any)?.type === type)
-		.map(([key, element]) => element);
+		.filter(([, element]) => (element as any)?.type === type)
+		.map(([, element]) => element);
 
 const getFirstItemFromArray = ([firstItem]) => firstItem;
 const removeHtmlTag = (html: string) => cheerio.load(html).text().trim();
@@ -170,9 +185,10 @@ const removeChildren = ($: Cheerio<any>, selector) => $.clone().children(selecto
 
 export class CharacterProfile {
 	private profile: any = {};
-	private memberNo: string = '';
-	private pcId: string = '';
-	private worldNo: string = '';
+	private memberNo = '';
+	private pcId = '';
+	private worldNo = '';
+	private cache = new Map();
 
 	constructor(private $: CheerioAPI, body: string) {
 		let t: any = body.match(/<script type="text\/javascript">[\s\S]*?= ([\s\S]*})?;/);
@@ -190,6 +206,53 @@ export class CharacterProfile {
 		t = body.match(WORLD_NO_REGEX);
 		if ( t === null ) throw Error('Cannot parsing _worldNo variable');
 		this.worldNo = t[1];
+
+		return new Proxy(this, {
+			get: (oTarget, sKey) => {
+				if ( Object.getPrototypeOf(this).hasOwnProperty(sKey) ) {
+					return this.cache.get(sKey) ||
+						this.cache.set(sKey, oTarget[sKey])
+						.get(sKey);
+				}
+				return oTarget[sKey];
+			},
+		})
+	}
+
+	get image(): string {
+		return this.$(CHARACTER_IMG_QUERY).attr('src') || '';
+	}
+
+	get nickname(): string {
+		return this.$(NICKNAME_QUERY).text().trim();
+	}
+
+	get itemLevel(): string {
+		return this.$('.level-info2__item').text().match(/Lv\.([0-9,.]*)/)?.[1].replace(',', '') || '';
+	}
+
+	get expLevel(): number {
+		return parseInt(this.$('.level-info__expedition').text().match(/Lv\.([0-9,.]*)/)?.[1] as string) || 0;
+	}
+
+	get level(): number {
+		const level = this.$('.profile-character-info__lv').text().match(/\d+/);
+		if ( level ) {
+			return +level[0];
+		}
+		return 0;
+	}
+
+	get server(): string {
+		return this.$('.profile-character-info__server').text().replace(/^@/, '') || '';
+	}
+
+	get job(): string {
+		return this.$('.profile-character-info__img').attr('alt') || '';
+	}
+
+	get emblem(): string {
+		return this.$('.profile-character-info__img').attr('src') || '';
 	}
 
 	get title(): string {
@@ -248,16 +311,17 @@ export class CharacterProfile {
 						.split(SPLIT_BREAKLINE_REGEX)
 						.map(removeHtmlTag)
 						.map((str) => str.match(STATUS_REGEX))
-						.map(([m, name, amount]: RegExpMatchArray) => ({ name, amount: +amount }));
+						.map(([, name, amount]: RegExpMatchArray) => ({ name, amount: +amount }));
 					obj.battleStatus = battleStatusBox.value.Element_001
 						.split(SPLIT_BREAKLINE_REGEX)
 						.map(removeHtmlTag)
-						.map(([m, name, amount]: RegExpMatchArray) => ({ name, amount: +amount }));
+						.map((str) => str.match(STATUS_REGEX))
+						.map(([, name, amount]: RegExpMatchArray) => ({ name, amount: +amount }));
 					obj.engraves = engraveBox.value.Element_001
 						.split(SPLIT_BREAKLINE_REGEX)
 						.map(removeHtmlTag)
 						.map((str) => str.match(ACCESSORY_ENGRAVE_REGEX))
-						.map(([m, name, level]: RegExpMatchArray) => ({ name, level: +level }));
+						.map(([, name, level]: RegExpMatchArray) => ({ name, level: +level }));
 				}),
 			)(searchEquipElementByType(equip, 'ItemPartBox'));
 			results.push(obj as CharacterProfileAccessory);
@@ -276,7 +340,7 @@ export class CharacterProfile {
 				getFirstItemFromArray,
 				({ value }: any) => removeHtmlTag(value),
 				(str) => str.match(EQUIPMENT_REGEX),
-				(([m, upgrade, name]: RegExpMatchArray) => {
+				(([, upgrade, name]: RegExpMatchArray) => {
 					obj.name = name;
 					obj.upgrade = +upgrade;
 				}),
@@ -289,6 +353,11 @@ export class CharacterProfile {
 					obj.iconPath = value.slotData.iconPath;
 				},
 			)(searchEquipElementByType(equip, 'ItemTitle'));
+
+			obj.setName = pipe(
+				(list: any[]) => list.find(item => removeHtmlTag(item.value.Element_000) === '세트 효과 레벨'),
+				({ value }) => removeHtmlTag(value.Element_001),
+			)(searchEquipElementByType(equip, 'ItemPartBox'));
 			results.push(obj as CharacterProfileEquipment);
 		});
 		return results;
@@ -314,15 +383,26 @@ export class CharacterProfile {
 		)(searchEquipElementByType(equip, 'ItemTitle'));
 
 		pipe(
-			([ defaultBox, bonusBox, engraveBox ]) => {
+			([ , , engraveBox ]) => {
 				result.engraves = engraveBox.value.Element_001
 					.split(SPLIT_BREAKLINE_REGEX)
 					.map(removeHtmlTag)
 					.map((str) => str.match(ACCESSORY_ENGRAVE_REGEX))
-					.map(([m, name, level]: RegExpMatchArray) => ({ name, level: +level }));
+					.map(([, name, level]: RegExpMatchArray) => ({ name, level: +level }));
 			},
 		)(searchEquipElementByType(equip, 'ItemPartBox'));
 		return result;
+	}
+
+	get gems(): CharacterProfileGems[] {
+		const results: CharacterProfileGems[] = this.profile.GemSkillEffect.map((obj) => ({
+			index: obj.EquipGemSlotIndex,
+			description: removeHtmlTag(obj.SkillDesc),
+			icon: obj.SkillIcon,
+			name: obj.SkillName,
+			slotIndex: obj.SkillSlotIndex,
+		})) || [];
+		return results;
 	}
 
 	get skills(): CharacterProfileSkill[] {
@@ -347,6 +427,7 @@ export class CharacterProfile {
 							newObj.title = (removeHtmlTag(value.leftStr0)
 								.match(SKILL_RUNE_REGEX) as RegExpMatchArray)[1];
 							newObj.iconPath = value.slotData.iconPath;
+							newObj.grade = value.slotData.iconGrade;
 						},
 					)(searchEquipElementByType(rune.tooltip, 'ItemTitle'));
 
@@ -363,6 +444,12 @@ export class CharacterProfile {
 				tridpod.name = removeHtmlTag(tridpod.name);
 				return tridpod;
 			});
+
+			skill.use = (
+				skill.level > 1 ||
+				!!skill.rune ||
+				!!this.gems.find((g) => g.name === skill.name)
+			);
 			results.push(skill as CharacterProfileSkill);
 		});
 		return results;
@@ -439,7 +526,7 @@ export class CharacterProfile {
 			)(searchEquipElementByType(equip, 'NameTagBox'));
 
 			obj.level = pipe(
-				([m, level]: RegExpMatchArray) => +level,
+				([, level]: RegExpMatchArray) => +level,
 			)(obj.name.match(JEWEL_LEVEL_REGEX));
 
 			pipe(
@@ -447,6 +534,7 @@ export class CharacterProfile {
 				({ value }) => {
 					obj.title = removeHtmlTag(value.leftStr0);
 					obj.iconPath = value.slotData.iconPath;
+					obj.grade = value.slotData.iconGrade;
 				},
 			)(searchEquipElementByType(equip, 'ItemTitle'));
 
@@ -484,6 +572,7 @@ export class CharacterProfile {
 				({ value }) => {
 					obj.awakeCount = value.awakeCount;
 					obj.awakeTotal = value.awakeTotal;
+					obj.tierGrade = value.tierGrade;
 					obj.iconPath = value.iconData.iconPath;
 				},
 			)(searchEquipElementByType(card, 'Card'));
@@ -551,8 +640,12 @@ export class CharacterProfile {
 	}
 }
 
-export async function char(name: string) {
+export async function char(name: string): Promise<CharacterProfile|undefined> {
 	const res = await axios.get(`https://lostark.game.onstove.com/Profile/Character/${qs.escape(name)}`);
 	const $ = cheerio.load(res.data);
-	return new CharacterProfile($, res.data);
+    try {
+        return new CharacterProfile($, res.data);
+    } catch (err) {
+        //return err;
+    }
 }
