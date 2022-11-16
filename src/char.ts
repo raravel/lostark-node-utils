@@ -189,24 +189,48 @@ export class CharacterProfile {
 	private pcId = '';
 	private worldNo = '';
 	private cache = new Map();
+    private statusMessage = 'fail';
 
 	constructor(private $: CheerioAPI, body: string) {
+        const isInspection = $('head title').text().includes('서비스 점검');
+        if ( isInspection ) {
+            this.statusMessage = 'inspection';
+            return;
+        }
+
 		let t: any = body.match(/<script type="text\/javascript">[\s\S]*?= ([\s\S]*})?;/);
-		if ( t === null ) throw Error('Cannot parsing profile information');
+		if ( t === null ) {
+            this.statusMessage = 'profile_parse_error';
+            return;
+            //throw Error('Cannot parsing profile information');
+        }
 		this.profile = JSON.parse(t[1]);
 
 		t = body.match(MEMBER_NO_REGEX);
-		if ( t === null ) throw Error('Cannot parsing _memberNo variable');
+		if ( t === null ) {
+            this.statusMessage = 'member_parse_error';
+            return;
+            //throw Error('Cannot parsing _memberNo variable');
+        }
 		this.memberNo = t[1];
 
 		t = body.match(PC_ID_REGEX);
-		if ( t === null ) throw Error('Cannot parsing _pcId variable');
+		if ( t === null ) {
+            this.statusMessage = 'pcId_parse_error';
+            return;
+            //throw Error('Cannot parsing _pcId variable');
+        }
 		this.pcId = t[1];
 
 		t = body.match(WORLD_NO_REGEX);
-		if ( t === null ) throw Error('Cannot parsing _worldNo variable');
+		if ( t === null ) {
+            this.statusMessage = 'world_parse_error';
+            return;
+            //throw Error('Cannot parsing _worldNo variable');
+        }
 		this.worldNo = t[1];
 
+        this.statusMessage = 'success';
 		return new Proxy(this, {
 			get: (oTarget, sKey) => {
 				if ( Object.getPrototypeOf(this).hasOwnProperty(sKey) ) {
@@ -218,6 +242,10 @@ export class CharacterProfile {
 			},
 		})
 	}
+    
+    get status(): string {
+        return this.statusMessage;
+    }
 
 	get image(): string {
 		return this.$(CHARACTER_IMG_QUERY).attr('src') || '';
@@ -646,12 +674,8 @@ export class CharacterProfile {
 	}
 }
 
-export async function char(name: string): Promise<CharacterProfile|undefined> {
+export async function char(name: string): Promise<CharacterProfile> {
 	const res = await axios.get(`https://lostark.game.onstove.com/Profile/Character/${qs.escape(name)}`);
 	const $ = cheerio.load(res.data);
-    try {
-        return new CharacterProfile($, res.data);
-    } catch (err) {
-        //return err;
-    }
+    return new CharacterProfile($, res.data);
 }
