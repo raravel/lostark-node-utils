@@ -3,7 +3,7 @@
 	"description": "nodejs lostark api utils",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
-	"version": "1.0.3",
+	"version": "1.0.4",
 	"author": {
 		"name": "raravel",
 		"email": "youn@tree-some.dev"
